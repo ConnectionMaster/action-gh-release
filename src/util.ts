@@ -13,12 +13,14 @@ export interface Config {
   input_body_path?: string;
   input_files?: string[];
   input_draft?: boolean;
+  input_preserve_order?: boolean;
   input_prerelease?: boolean;
   input_fail_on_unmatched_files?: boolean;
   input_target_commitish?: string;
   input_discussion_category_name?: string;
   input_generate_release_notes?: boolean;
   input_append_body?: boolean;
+  input_make_latest: "true" | "false" | "legacy" | undefined;
 }
 
 export const uploadUrl = (url: string): string => {
@@ -44,9 +46,9 @@ export const parseInputFiles = (files: string): string[] => {
     (acc, line) =>
       acc
         .concat(line.split(","))
-        .filter(pat => pat)
-        .map(pat => pat.trim()),
-    []
+        .filter((pat) => pat)
+        .map((pat) => pat.trim()),
+    [],
   );
 };
 
@@ -61,6 +63,9 @@ export const parseConfig = (env: Env): Config => {
     input_body_path: env.INPUT_BODY_PATH,
     input_files: parseInputFiles(env.INPUT_FILES || ""),
     input_draft: env.INPUT_DRAFT ? env.INPUT_DRAFT === "true" : undefined,
+    input_preserve_order: env.INPUT_PRESERVE_ORDER
+      ? env.INPUT_PRESERVE_ORDER == "true"
+      : undefined,
     input_prerelease: env.INPUT_PRERELEASE
       ? env.INPUT_PRERELEASE == "true"
       : undefined,
@@ -69,14 +74,24 @@ export const parseConfig = (env: Env): Config => {
     input_discussion_category_name:
       env.INPUT_DISCUSSION_CATEGORY_NAME || undefined,
     input_generate_release_notes: env.INPUT_GENERATE_RELEASE_NOTES == "true",
-    input_append_body: env.INPUT_APPEND_BODY == "true"
+    input_append_body: env.INPUT_APPEND_BODY == "true",
+    input_make_latest: parseMakeLatest(env.INPUT_MAKE_LATEST),
   };
+};
+
+const parseMakeLatest = (
+  value: string | undefined,
+): "true" | "false" | "legacy" | undefined => {
+  if (value === "true" || value === "false" || value === "legacy") {
+    return value;
+  }
+  return undefined;
 };
 
 export const paths = (patterns: string[]): string[] => {
   return patterns.reduce((acc: string[], pattern: string): string[] => {
     return acc.concat(
-      glob.sync(pattern).filter(path => statSync(path).isFile())
+      glob.sync(pattern).filter((path) => statSync(path).isFile()),
     );
   }, []);
 };
@@ -84,13 +99,17 @@ export const paths = (patterns: string[]): string[] => {
 export const unmatchedPatterns = (patterns: string[]): string[] => {
   return patterns.reduce((acc: string[], pattern: string): string[] => {
     return acc.concat(
-      glob.sync(pattern).filter(path => statSync(path).isFile()).length == 0
+      glob.sync(pattern).filter((path) => statSync(path).isFile()).length == 0
         ? [pattern]
-        : []
+        : [],
     );
   }, []);
 };
 
 export const isTag = (ref: string): boolean => {
   return ref.startsWith("refs/tags/");
+};
+
+export const alignAssetName = (assetName: string): string => {
+  return assetName.replace(/ /g, ".");
 };

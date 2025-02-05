@@ -3,12 +3,11 @@ import {
   parseConfig,
   isTag,
   unmatchedPatterns,
-  uploadUrl
+  uploadUrl,
 } from "./util";
 import { release, upload, GitHubReleaser } from "./github";
 import { getOctokit } from "@actions/github";
 import { setFailed, setOutput } from "@actions/core";
-import { GitHub, getOctokitOptions } from "@actions/github/lib/utils";
 
 import { env } from "process";
 
@@ -24,9 +23,13 @@ async function run() {
     }
     if (config.input_files) {
       const patterns = unmatchedPatterns(config.input_files);
-      patterns.forEach(pattern =>
-        console.warn(`🤔 Pattern '${pattern}' does not match any files.`)
-      );
+      patterns.forEach((pattern) => {
+        if (config.input_fail_on_unmatched_files) {
+          throw new Error(`⚠️  Pattern '${pattern}' does not match any files.`);
+        } else {
+          console.warn(`🤔 Pattern '${pattern}' does not match any files.`);
+        }
+      });
       if (patterns.length > 0 && config.input_fail_on_unmatched_files) {
         throw new Error(`⚠️ There were unmatched files`);
       }
@@ -42,7 +45,7 @@ async function run() {
       throttle: {
         onRateLimit: (retryAfter, options) => {
           console.warn(
-            `Request quota exhausted for request ${options.method} ${options.url}`
+            `Request quota exhausted for request ${options.method} ${options.url}`,
           );
           if (options.request.retryCount === 0) {
             // only retries once
@@ -53,34 +56,49 @@ async function run() {
         onAbuseLimit: (retryAfter, options) => {
           // does not retry, only logs a warning
           console.warn(
-            `Abuse detected for request ${options.method} ${options.url}`
+            `Abuse detected for request ${options.method} ${options.url}`,
           );
-        }
-      }
+        },
+      },
     });
     //);
     const rel = await release(config, new GitHubReleaser(gh));
-    if (config.input_files) {
+    if (config.input_files && config.input_files.length > 0) {
       const files = paths(config.input_files);
       if (files.length == 0) {
-        console.warn(`🤔 ${config.input_files} not include valid file.`);
+        if (config.input_fail_on_unmatched_files) {
+          throw new Error(
+            `⚠️ ${config.input_files} does not include a valid file.`,
+          );
+        } else {
+          console.warn(
+            `🤔 ${config.input_files} does not include a valid file.`,
+          );
+        }
       }
       const currentAssets = rel.assets;
-      const assets = await Promise.all(
-        files.map(async path => {
-          const json = await upload(
-            config,
-            gh,
-            uploadUrl(rel.upload_url),
-            path,
-            currentAssets
-          );
-          delete json.uploader;
-          return json;
-        })
-      ).catch(error => {
-        throw error;
-      });
+
+      const uploadFile = async (path) => {
+        const json = await upload(
+          config,
+          gh,
+          uploadUrl(rel.upload_url),
+          path,
+          currentAssets,
+        );
+        delete json.uploader;
+        return json;
+      };
+
+      let assets;
+      if (!config.input_preserve_order) {
+        assets = await Promise.all(files.map(uploadFile));
+      } else {
+        assets = [];
+        for (const path of files) {
+          assets.push(await uploadFile(path));
+        }
+      }
       setOutput("assets", assets);
     }
     console.log(`🎉 Release ready at ${rel.html_url}`);
